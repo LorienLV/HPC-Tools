@@ -53,6 +53,16 @@ after_run() {
 #                DO NOT TOUCH ANYTHING BELOW THIS COMMENT                      #
 ################################################################################
 
+# Trap ctrl_c -> Cancel the jobs.
+ctrl_c_trap() {
+    for job_id in "${jobs_id[@]}"; do
+        scancel "$job_id" >/dev/null 2>&1
+    done
+}
+
+# Trap ctrl_c -> Cancel the jobs.
+trap ctrl_c_trap EXIT
+
 #
 # Starting the jobs.
 #
@@ -229,7 +239,7 @@ for i in "${!jobs_id[@]}"; do
     echo "    - MPI ranks: $mpi"
     echo "    - OMP threads: $omp"
     echo -e "    - Status: $status_string"
-    echo "    - Total wall time: $wall_time"
+    echo "    - Total wall time: $wall_time s"
     echo "Message:"
     echo "$after_run_out"
 done
