@@ -1,60 +1,96 @@
 #!/bin/bash
 
-# A regression test template for the slurm job-scheduler
+# A regression test template for SLURM and PJM job-schedulers
 
-# Use srun/mpirun? 1 -> yes, 0 -> no.
-mpienable=0
-# Clean the output files after finishing? 1 -> yes, 0 -> no.
+# Clean the stage folder of the jobs after finishing? 1 -> yes, 0 -> no.
 clean=1
 
 # The name of the job.
 job="test"
 
-# Slurm job additional parameters.
+# job additional parameters.
 job_options=(
-    '-L elapse=00:20:00'
+    #    '--exclusive'
+    '--time=00:00:01'
+    '--qos=debug'
 )
 
 # Commands to run.
+# You can access the number of mpi-ranks using the environment variable
+# MPI_RANKS and the number of omp-threads using the environment variable
+# OMP_NUM_THREADS:
+# commands=(
+#    'command $MPI_RANKS $OMP_NUM_THREADS'
+#)
+# OR
+# commands=(
+#    "command \$MPI_RANKS \$OMP_NUM_THREADS"
+#)
 commands=(
-    'sleep 10'
-    'sleep 12'
-    'sleep 120'
+    'time -p sbatch sleep 10'
+    'time -p sbatch sleep 12'
+    'time -p sbatch sleep 120'
 )
 
 # Additional arguments to pass to the commands.
-executable_opts=""
+command_opts=""
 
-# Noes, MPI ranks and OMP theads used to execute with each command.
+# Nodes, MPI ranks and OMP theads used to execute with each command.
 parallelism=(
     'nodes=1, mpi=1, omp=1'
     # 'nodes=4, mpi=5, omp=6'
 )
 
 #
-# This is executed when a job has finished. You can use this function to
+# Additional variables.
+#
+
+#
+# This function is executed before launching a job. You can use this function to
+# prepare the stage folder of the job.
+#
+before_run() {
+    # Can access $scriptfolder
+    job_name="$1"
+}
+
+#
+# This function is executed when a job has finished. You can use this function to
 # perform a sanity check and to output something in the report of a job.
 #
 # echo: The message that you want to output in the report of the job.
-# return: 1 if the run is correct, 0 otherwise.
+# return: 0 if the run is correct, 1 otherwise.
 #
 after_run() {
     # Can access $scriptfolder
     job_name="$1"
 
-    echo "GREAT!"
+    wall_time="$(tac "$job_name.err" | grep -m 1 "real" | cut -d ' ' -f 2)"
 
-    return 0 # Ok
+    echo "Wall time: $wall_time s"
+
+    return 0 # OK
 }
 
 ################################################################################
 #                DO NOT TOUCH ANYTHING BELOW THIS COMMENT                      #
 ################################################################################
 
+# Detect the job-scheduler
+job_scheduler=""
+if [[ $(which sbatch) || $? -eq 0 ]]; then
+    job_scheduler="SLURM"
+elif [[ $(which pjsub) || $? -eq 0 ]]; then
+    job_scheduler="PJM"
+else
+    echo "No job-scheduler found. Current supported schedulers: SLURM and PJM"
+    exit 1
+fi
+
 # Trap ctrl_c -> Cancel the jobs.
 ctrl_c_trap() {
     for job_id in "${jobs_id[@]}"; do
-        pjdel "$job_id" >/dev/null 2>&1
+        scancel "$job_id" >/dev/null 2>&1
     done
 }
 
@@ -85,7 +121,7 @@ jobs_name=()
 jobs_nodes=()
 jobs_mpi=()
 jobs_omp=()
-for bin in "${commands[@]}"; do
+for command in "${commands[@]}"; do
     for par in "${parallelism[@]}"; do
         nodes="$(echo "$par" | sed -n -E 's/.*nodes[ ]*=[ ]*([0-9]+).*/\1/p')"
         mpi="$(echo "$par" | sed -n -E 's/.*mpi[ ]*=[ ]*([0-9]+).*/\1/p')"
@@ -108,52 +144,78 @@ for bin in "${commands[@]}"; do
             echo "\033[33mWarning: The number of OpenMP threads is $omp, which is invalid, using 1 instead\e[0m"
         fi
 
-        bin_trilled="$(echo "$bin" | tr -dc '[:alnum:]\n\r')"
+        command_trilled="$(echo "$command" | tr -dc '[:alnum:]\n\r')"
         date_compact="$(date '+%Y%m%d_%H%M%S')"
-        jobname="${job}_${bin_trilled}_nodes_${nodes}_mpi_${mpi}_omp_${omp}_${date_compact}"
+        jobname="${job}_${command_trilled}_nodes_${nodes}_mpi_${mpi}_omp_${omp}_${date_compact}"
 
         mkdir "$jobname" >/dev/null 2>&1
 
         # Create the job script
         jobscript="#!/bin/bash\n"
-        jobscript+="#PJM -N $jobname\n"
-        jobscript+="#PJM -L node=$nodes\n"
-        jobscript+="#PJM --mpi proc=$mpi\n"
-        jobscript+="#PJM -o ${jobname}.out\n"
-        jobscript+="#PJM -e ${jobname}.err\n"
 
-        for job_option in "${job_options[@]}"; do
-            jobscript+="#PJM $job_option\n"
-        done
+        if [[ "$job_scheduler" == "SLURM" ]]; then
+            jobscript+="#SBATCH --job-name=$jobname\n"
+            jobscript+="#SBATCH --nodes=$nodes\n"
+            jobscript+="#SBATCH --ntasks=$mpi\n"
+            jobscript+="#SBATCH --cpus-per-task=$omp\n"
+            jobscript+="#SBATCH --output=${jobname}.out\n"
+            jobscript+="#SBATCH --error=${jobname}.err\n"
 
-        jobscript+="export OMP_NUM_THREADS=$omp\n"
+            for job_option in "${job_options[@]}"; do
+                jobscript+="#SBATCH $job_option\n"
+            done
+        elif [[ "$job_scheduler" == "PJM" ]]; then
+            jobscript+="#PJM -N $jobname\n"
+            jobscript+="#PJM -L node=$nodes\n"
+            jobscript+="#PJM --mpi proc=$mpi\n"
+            jobscript+="#PJM -o ${jobname}.out\n"
+            jobscript+="#PJM -e ${jobname}.err\n"
 
-        jobscript+="time -p "
-
-        if [ "$mpienable" -eq 1 ]; then
-            jobscript+="mpirun -n $mpi "
+            for job_option in "${job_options[@]}"; do
+                jobscript+="#PJM $job_option\n"
+            done
         fi
 
-        jobscript+="$bin $executable_opts"
+        jobscript+="export MPI_RANKS=$mpi\n"
+        jobscript+="export OMP_NUM_THREADS=$omp\n"
 
-        initial_folder="$(pwd)"
+        jobscript+="$command $command_opts"
+
+        # cd to the stage folder of the job.
+        current_folder="$(pwd)"
         cd "$jobname"
         echo -e "$jobscript" >"${jobname}.sh"
-        sbatch_out="$(pjsub "${jobname}.sh" 2>&1)"
+
+        # Call before run function
+        before_run_out="$(before_run "$job_name")"
+
+        # Run the job.
+        run_out=""
+        if [[ "$job_scheduler" == "SLURM" ]]; then
+            run_out=$(sbatch "${jobname}.sh" 2>&1)
+        elif [[ "$job_scheduler" == "PJM" ]]; then
+            run_out="$(pjsub "${jobname}.sh" 2>&1)"
+        fi
 
         if [ "$?" -ne 0 ]; then
             echo "[----------]"
             echo -e "[ \033[31m FAILED \e[0m ] Started processing $jobname"
             echo "[----------]"
             echo ""
-            echo "$sbatch_out"
+            echo "$run_out"
 
             nfailed_jobs=$((nfailed_jobs + 1))
             jobs_status+="F" # Failed
         else
             jobs_name+=("$jobname")
 
-            job_id="$(echo "$sbatch_out" | cut -d ' ' -f6)"
+            job_id=""
+            if [[ "$job_scheduler" == "SLURM" ]]; then
+                job_id="$(echo "$run_out" | cut -d ' ' -f4)"
+            elif [[ "$job_scheduler" == "PJM" ]]; then
+                job_id="$(echo "$run_out" | cut -d ' ' -f6)"
+            fi
+
             jobs_id+=("$job_id")
 
             echo "[----------]"
@@ -164,7 +226,7 @@ for bin in "${commands[@]}"; do
             jobs_status+="R" # Ready
         fi
 
-        cd "$initial_folder"
+        cd "$current_folder"
     done
 done
 
@@ -178,7 +240,7 @@ for i in "${!jobs_id[@]}"; do
     status="${jobs_status[i]}"
 
     if [[ "$status" == "F" ]]; then
-        # Already failed, do not run sanity check.
+        # Already failed, do not wait.
         continue
     fi
 
@@ -190,33 +252,41 @@ for i in "${!jobs_id[@]}"; do
     omp="${jobs_omp[i]}"
 
     # Wait for job to finish
-    slurmstate=""
+    job_state=""
     while :; do
         sleep 1
-        slurmstate="$(pjstat -H -S $job_id | grep "^[ ]*STATE[ ]*:[ ]*" | tr -s ' ' | cut -d ' ' -f 4)"
-        if [[ -z "$slurmstate" ]]; then
-            # Still running
-            continue
+        if [[ "$job_scheduler" == "SLURM" ]]; then
+            job_state="$(sacct -p -n -j $job_id | grep "^$job_id|" | cut -d '|' -f 6)"
+            if [[ -n "$slurmstate" && "$slurmstate" != "PENDING" && "$slurmstate" != "RUNNING" && \
+                "$slurmstate" != "REQUEUED" && "$slurmstate" != "RESIZING" && \
+                "$slurmstate" != "SUSPENDED" && "$slurmstate" != "REVOKED" ]]; then
+                break
+            fi
+        elif [[ "$job_scheduler" == "PJM" ]]; then
+            job_state="$(pjstat -H -S $job_id | grep "^[ ]*STATE[ ]*:[ ]*" | tr -s ' ' | cut -d ' ' -f 4)"
+            if [[ -n "$slurmstate" ]]; then
+                # Has finished
+                break
+            fi
         fi
-        # Has finished
-        break
     done
 
-    status="$slurmstate"
+    status="$job_state"
     wall_time="NULL"
     after_run_out=""
 
-    # OK
-    if [[ "$slurmstate" == "EXT" ]]; then
+    if [[ ("$job_scheduler" == "SLURM" && "$slurmstate" == "COMPLETED") || \
+           ("$job_scheduler" == "PJM" && "$slurmstate" == "EXT") ]]; then
         #
         # Sanity check
         #
+        current_folder="$(pwd)"
+        cd "$jobname"
         after_run_out="$(after_run "$job_name")"
+        cd "$current_folder"
 
         if [[ $? -eq 0 ]]; then
             status="OK"
-
-            wall_time="$(tac "$job_name/$job_name.err" | grep -m 1 "real" | cut -d ' ' -f 2)"
         else
             status="SANITY CHECK FAILED"
             nfailed_jobs=$((nfailed_jobs + 1))
@@ -238,7 +308,6 @@ for i in "${!jobs_id[@]}"; do
     echo "    - MPI ranks: $mpi"
     echo "    - OMP threads: $omp"
     echo -e "    - Status: $status_string"
-    echo "    - Total wall time: $wall_time s"
     echo "Message:"
     echo "$after_run_out"
 done
