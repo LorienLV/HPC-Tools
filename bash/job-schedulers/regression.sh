@@ -292,14 +292,13 @@ for i in "${!jobs_id[@]}"; do
         current_folder="$(pwd)"
         cd "$job_name"
         after_run_out="$(after_run "$job_name")"
-        cd "$current_folder"
-
         if [[ $? -eq 0 ]]; then
             status="OK"
         else
             status="SANITY CHECK FAILED"
             nfailed_jobs=$((nfailed_jobs + 1))
         fi
+        cd "$current_folder"
     else
         nfailed_jobs=$((nfailed_jobs + 1))
     fi
