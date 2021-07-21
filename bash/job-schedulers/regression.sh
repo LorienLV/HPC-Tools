@@ -99,7 +99,7 @@ trap ctrl_c_trap EXIT
 # Starting the jobs.
 #
 
-export scriptfolder="$(realpath $0)"
+export scriptfolder="$(dirname $(realpath $0))"
 workfolder="$(pwd)"
 
 njobs=$((${#commands[@]} * ${#parallelism[@]}))
