@@ -88,7 +88,11 @@ fi
 # Trap ctrl_c -> Cancel the jobs.
 ctrl_c_trap() {
     for job_id in "${jobs_id[@]}"; do
-        scancel "$job_id" >/dev/null 2>&1
+        if [[ "$job_scheduler" == "SLURM" ]]; then
+            scancel "$job_id" >/dev/null 2>&1
+        elif [[ "$job_scheduler" == "PJM" ]]; then
+            pjdel "$job_id" >/dev/null 2>&1
+        fi
     done
 }
 
@@ -146,6 +150,7 @@ for command in "${commands[@]}"; do
         command_trilled="$(echo "$command" | tr -dc '[:alnum:]\n\r')"
         date_compact="$(date '+%Y%m%d_%H%M%S')"
         job_name="${job}_${command_trilled}_nodes_${nodes}_mpi_${mpi}_omp_${omp}_${date_compact}"
+        job_id="-1"
 
         mkdir "$job_name" >/dev/null 2>&1
 
@@ -209,18 +214,11 @@ for command in "${commands[@]}"; do
             nfailed_jobs=$((nfailed_jobs + 1))
             jobs_status+="F" # Failed
         else
-            jobs_name+=("$job_name")
-
-            job_id=""
             if [[ "$job_scheduler" == "SLURM" ]]; then
                 job_id="$(echo "$run_out" | cut -d ' ' -f4)"
             elif [[ "$job_scheduler" == "PJM" ]]; then
                 job_id="$(echo "$run_out" | cut -d ' ' -f6)"
-            else
-                job_id="0"
             fi
-
-            jobs_id+=("$job_id")
 
             echo "[----------]"
             echo -e "[ \033[32m RUN \e[0m    ] Started processing $job_name"
@@ -229,6 +227,9 @@ for command in "${commands[@]}"; do
 
             jobs_status+="R" # Ready
         fi
+
+        jobs_id+=("$job_id")
+        jobs_name+=("$job_name")
 
         cd "$current_folder"
     done
@@ -299,6 +300,7 @@ for i in "${!jobs_id[@]}"; do
             nfailed_jobs=$((nfailed_jobs + 1))
         fi
         cd "$current_folder"
+
     else
         nfailed_jobs=$((nfailed_jobs + 1))
     fi
