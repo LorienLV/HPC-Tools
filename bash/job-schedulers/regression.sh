@@ -109,7 +109,7 @@ workfolder="$(pwd)"
 njobs=$((${#commands[@]} * ${#parallelism[@]}))
 
 echo "[Setup]"
-echo "    job scheduler: '$job_scheduler'"
+echo "    job scheduler:     '$job_scheduler'"
 echo "    working directory: '$workfolder'"
 echo "    script path:       '$scriptfolder'"
 echo ""
