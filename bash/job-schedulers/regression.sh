@@ -212,7 +212,7 @@ for command in "${commands[@]}"; do
             echo "$run_out"
 
             nfailed_jobs=$((nfailed_jobs + 1))
-            jobs_status+="F" # Failed
+            jobs_status+=("F") # Failed
         else
             if [[ "$job_scheduler" == "SLURM" ]]; then
                 job_id="$(echo "$run_out" | cut -d ' ' -f4)"
@@ -225,7 +225,7 @@ for command in "${commands[@]}"; do
             echo "[----------]"
             echo ""
 
-            jobs_status+="R" # Ready
+            jobs_status+=("R") # Ready
         fi
 
         jobs_id+=("$job_id")
