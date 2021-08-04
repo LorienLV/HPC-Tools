@@ -291,11 +291,15 @@ for i in "${!jobs_id[@]}"; do
         #
         current_folder="$(pwd)"
         cd "$job_name"
-        after_run_out="$(after_run "$job_name")"
+        after_run_out="$(after_run "$job_name" 2>&1)"
         if [[ $? -eq 0 ]]; then
             status="OK"
+
+            jobs_status[$i]='V' # Valid
         else
             status="SANITY CHECK FAILED"
+
+            jobs_status[$i]='F' # Failed
             nfailed_jobs=$((nfailed_jobs + 1))
         fi
         cd "$current_folder"
@@ -336,7 +340,14 @@ echo "[==========] Finished on $(date)"
 
 # Clean all the stage directories.
 if [[ $clean -eq 1 ]]; then
-    for job_name in "${jobs_name[@]}"; do
-        rm -rf "$job_name"
+    for i in "${!jobs_id[@]}"; do
+
+        status="${jobs_status[i]}"
+        job_name="${jobs_name[i]}"
+
+        # Only remove the directory if the execution was OK.
+        if [[ "$status" == 'V' ]]; then
+            rm -rf "$job_name"
+        fi
     done
 fi
