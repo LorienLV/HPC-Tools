@@ -291,7 +291,7 @@ for i in "${!jobs_id[@]}"; do
         #
         current_folder="$(pwd)"
         cd "$job_name"
-        after_run_out="$(after_run "$job_name")"
+        after_run_out="$(after_run "$job_name" 2>&1)"
         if [[ $? -eq 0 ]]; then
             status="OK"
         else
