@@ -1,92 +1,105 @@
 #!/bin/bash
 
-# A regression test template for SLURM and PJM job-schedulers
-
-# Clean the stage folder of the jobs after finishing? 1 -> yes, 0 -> no.
-clean=0
-
-# The name of the job.
-job="test"
-
-# job additional parameters.
-job_options=(
-    #    '--exclusive'
-    # '--time=00:00:01'
-    # '--qos=debug'
-)
-
-# Commands to run.
-# You can access the number of mpi-ranks using the environment variable
-# MPI_RANKS and the number of omp-threads using the environment variable
-# OMP_NUM_THREADS:
-# commands=(
-#    'command $MPI_RANKS $OMP_NUM_THREADS'
-#)
-# OR
-# commands=(
-#    "command \$MPI_RANKS \$OMP_NUM_THREADS"
-#)
-commands=(
-    'time -p sleep 1'
-    'time -p sleep 2'
-    'time -p sleep 3'
-)
-
-# Additional arguments to pass to the commands.
-command_opts=""
-
-# Nodes, MPI ranks and OMP theads used to execute with each command.
-parallelism=(
-    'nodes=1, mpi=1, omp=1'
-    # 'nodes=4, mpi=5, omp=6'
-)
-
 #
-# Additional variables.
+# A script to execute a set of regression tests under different job-schedulers.
+#
+# Supported job-schedulers: Local, SLURM and PJM.
+#
+# Before executing this script you have to define this variables:
+#
+#    Clean the stage folder of the jobs after finishing? 1 -> yes, 0 -> no.
+#    clean=1
+#
+#    The name of the job.
+#    job="NAME-OF-THE-JOB"
+#
+#    Commands to run.
+#    You can access the number of mpi-ranks using the environment variable
+#    MPI_RANKS and the number of omp-threads using the environment variable
+#    OMP_NUM_THREADS:
+#    commands=(
+#       'command $MPI_RANKS $OMP_NUM_THREADS'
+#    )
+#    OR
+#    commands=(
+#       "command \$MPI_RANKS \$OMP_NUM_THREADS"
+#    )
+#
+#    commands=(
+#          "sleep 5"
+#          "sleep 10"
+#     )
+#
+#    Additional arguments to pass to the commands.
+#    command_opts="-s 1"
+#
+#    Nodes, MPI ranks and OMP theads used to execute with each command.
+#    parallelism=(
+#        'nodes=1, mpi=1, omp=1'
+#        'nodes=1, mpi=1, omp=2'
+#        'nodes=1, mpi=1, omp=4'
+#        'nodes=1, mpi=1, omp=8'
+#        'nodes=1, mpi=1, omp=12'
+#        'nodes=1, mpi=1, omp=24'
+#        'nodes=1, mpi=1, omp=36'
+#        'nodes=1, mpi=1, omp=48'
+#    )
+#
+# Optional variables:
+#    
+#    Maximum allowed execution time of each command.
+#    time="hh:mm:ss"
+#    
+#    Run the commands in exclusive mode.
+#    exclusive=1
+#
+#    Scheduler additional parameters.
+#    job_options=(
+#        '--qos=debug'
+#    )
+#
+# You also have to define this two functions:
+#
+#    This function is executed before launching a job. You can use this function to
+#    prepare the stage folder of the job.
+#
+#    before_run() (
+#        job_name="$1"
+#    )
+#
+#    This function is executed when a job has finished. You can use this function to
+#    perform a sanity check and to output something in the report of a job.
+#
+#    echo: The message that you want to output in the report of the job.
+#    return: 0 if the run is correct, 1 otherwise.
+#
+#    after_run() (
+#        job_name="$1"
+#    
+#        echo "Message"
+#        return 1 # Failure
+#        return 0 # OK
+#    )
+#
+# WARNING: ALWAYS CALL THIS SCRIPT USING SOURCE AS YOU CAN NOT EXPORT ARRAYS
+# IN BASH.
+#
+#    source "regression.sh"
 #
 
-#
-# This function is executed before launching a job. You can use this function to
-# prepare the stage folder of the job.
-#
-before_run() {
-    # Can access $scriptfolder
-    job_name="$1"
-}
-
-#
-# This function is executed when a job has finished. You can use this function to
-# perform a sanity check and to output something in the report of a job.
-#
-# echo: The message that you want to output in the report of the job.
-# return: 0 if the run is correct, 1 otherwise.
-#
-after_run() {
-    # Can access $scriptfolder
-    job_name="$1"
-
-    wall_time="$(tac "$job_name.err" | grep -m 1 "real" | cut -d ' ' -f 2)"
-
-    echo "Wall time: $wall_time s"
-
-    return 0 # OK
-}
-
-################################################################################
-#                DO NOT TOUCH ANYTHING BELOW THIS COMMENT                      #
 ################################################################################
 
 # Detect the job-scheduler
 job_scheduler="NONE"
-if [[ $(which sbatch >/dev/null 2>&1) || $? -eq 0 ]]; then
+if [[ $(which sbatch) || $? -eq 0 ]]; then
     job_scheduler="SLURM"
-elif [[ $(which pjsub >/dev/null 2>&1) || $? -eq 0 ]]; then
+elif [[ $(which pjsub) || $? -eq 0 ]]; then
     job_scheduler="PJM"
 fi
 # else -> No job scheduler
 
 # Trap ctrl_c -> Cancel the jobs.
-ctrl_c_trap() {
+ctrl_c_trap() (
     for job_id in "${jobs_id[@]}"; do
         if [[ "$job_scheduler" == "SLURM" ]]; then
             scancel "$job_id" >/dev/null 2>&1
@@ -94,7 +107,7 @@ ctrl_c_trap() {
             pjdel "$job_id" >/dev/null 2>&1
         fi
     done
-}
+)
 
 # Trap ctrl_c -> Cancel the jobs.
 trap ctrl_c_trap EXIT
@@ -103,7 +116,7 @@ trap ctrl_c_trap EXIT
 # Starting the jobs.
 #
 
-export scriptfolder="$(dirname $(realpath $0))"
+scriptpath="$(realpath $0)"
 workfolder="$(pwd)"
 
 njobs=$((${#commands[@]} * ${#parallelism[@]}))
@@ -111,7 +124,7 @@ njobs=$((${#commands[@]} * ${#parallelism[@]}))
 echo "[Setup]"
 echo "    job scheduler:     '$job_scheduler'"
 echo "    working directory: '$workfolder'"
-echo "    script path:       '$scriptfolder'"
+echo "    script path:       '$scriptpath'"
 echo ""
 echo "[==========] Running $njobs job(s)"
 echo "[==========] Started on $(date)"
@@ -165,15 +178,31 @@ for command in "${commands[@]}"; do
             jobscript+="#SBATCH --output=${job_name}.out\n"
             jobscript+="#SBATCH --error=${job_name}.err\n"
 
+            if [[ -n "$time" ]]; then
+                jobscript+="#SBATCH --time=${job_name}.err\n"
+            fi
+
+            if [[ -n "$exclusive" && $exclusive == 1 ]]; then
+                jobscript+="#SBATCH --exclusive\n"
+            fi
+
             for job_option in "${job_options[@]}"; do
                 jobscript+="#SBATCH $job_option\n"
             done
         elif [[ "$job_scheduler" == "PJM" ]]; then
-            jobscript+="#PJM -N $job_name\n"
+            # jobscript+="#PJM -N $job_name\n"
             jobscript+="#PJM -L node=$nodes\n"
             jobscript+="#PJM --mpi proc=$mpi\n"
             jobscript+="#PJM -o ${job_name}.out\n"
             jobscript+="#PJM -e ${job_name}.err\n"
+
+            if [[ -n "$time" ]]; then
+                jobscript+="#PJM -L elapse=${job_name}.err\n"
+            fi
+
+            # if [[ -n "$exclusive" && $exclusive == 1 ]]; then
+            #     jobscript+="#PJM --exclusive\n"
+            # fi
 
             for job_option in "${job_options[@]}"; do
                 jobscript+="#PJM $job_option\n"
