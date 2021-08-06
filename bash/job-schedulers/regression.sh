@@ -91,9 +91,9 @@
 
 # Detect the job-scheduler
 job_scheduler="NONE"
-if [[ $(which sbatch) || $? -eq 0 ]]; then
+if [[ $(which sbatch >/dev/null 2>&1) || $? -eq 0 ]]; then
     job_scheduler="SLURM"
-elif [[ $(which pjsub) || $? -eq 0 ]]; then
+elif [[ $(which pjsub >/dev/null 2>&1) || $? -eq 0 ]]; then
     job_scheduler="PJM"
 fi
 # else -> No job scheduler
